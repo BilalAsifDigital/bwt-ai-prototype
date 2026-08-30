@@ -146,7 +146,7 @@ import { detectReportType, parseQueriesReport, parsePagesReport, parseOverviewRe
 import { buildSuggestions } from "./js/lib/suggest.mjs";
 
 const PROVIDER_LABELS = {
-  openai: "ChatGPT", perplexity: "Perplexity", gemini: "Gemini",
+  copilot: "Copilot", openai: "ChatGPT", perplexity: "Perplexity", gemini: "Gemini",
   google_ai_mode: "Google AI Mode", google_ai_overview: "AI Overviews",
 };
 const INTENTS = ["informational", "commercial", "transactional", "navigational"];
@@ -515,7 +515,7 @@ function renderRun(el) {
         <div><label>Queries (top N by Bing citations)</label><input type="number" id="topn" value="${Math.min(5, tracked.length)}" min="1" max="20" style="width:80px"></div>
         <div><label>Providers</label>
           ${providers.map(([k, l]) => `<label style="display:inline-flex;gap:6px;margin-right:12px;color:var(--gray-800);font-weight:400;align-items:center">
-            <input type="checkbox" data-p="${k}" ${k === "openai" || k === "perplexity" || k === "gemini" ? "checked" : ""}>${l}</label>`).join("")}
+            <input type="checkbox" data-p="${k}" ${k === "copilot" || k === "openai" || k === "perplexity" || k === "gemini" ? "checked" : ""}>${l}</label>`).join("")}
         </div>
         <button id="start">Start run</button>
       </div>
@@ -619,11 +619,11 @@ function renderResults(el) {
       </div>
       <div class="tiles" style="margin:16px 0 20px">
         <div class="tile"><div class="n">${qTotal}</div><div class="l">queries checked</div></div>
-        <div class="tile"><div class="n" style="color:var(--success)">${qTotal}/${qTotal}</div><div class="l">cited on Copilot/Bing (${bingPeriod()})</div></div>
+        <div class="tile"><div class="n" style="color:var(--success)">${qTotal}/${qTotal}</div><div class="l">in Bing export (${bingPeriod()})</div></div>
         ${provs.map((p) => `<div class="tile"><div class="n">${citedCount(p)}/${qTotal}</div><div class="l">cited on ${PROVIDER_LABELS[p]} (live check)</div></div>`).join("")}
       </div>
       <div class="scroll"><table>
-        <tr><th>Query</th><th>Copilot/Bing</th>${provs.map((p) => `<th>${PROVIDER_LABELS[p]}</th>`).join("")}</tr>
+        <tr><th>Query</th><th>Bing export</th>${provs.map((p) => `<th>${PROVIDER_LABELS[p]}${p === "copilot" ? " (live)" : ""}</th>`).join("")}</tr>
         ${[...byQuery.entries()].map(([q, cells], qi) => `<tr class="qrow" data-qi="${qi}" style="cursor:pointer">
           <td style="font-weight:500">${esc(q)} <span class="muted small">▾</span></td>
           <td><span class="pill ok">cited</span></td>
@@ -655,10 +655,11 @@ function renderResults(el) {
           </div>
         </td></tr>`).join("")}
       </table></div>
-      <p class="muted small" style="margin-bottom:0">"Copilot/Bing: cited" is from your Bing Webmaster Tools export, an aggregate over ${bingPeriod()};
-      the other columns are single live checks of each answer's cited sources, matched against ${esc(state.current.project.domain)},
-      so the two are directional evidence, not a like-for-like comparison.
-      <b>Click any row</b> to see exactly which sites each AI cited, including the competitors winning answers you are missing from.</p>
+      <p class="muted small" style="margin-bottom:0">"Bing export: cited" is from your Bing Webmaster Tools export, an aggregate over ${bingPeriod()};
+      the provider columns (Copilot included) are single live checks of each answer's cited sources, matched against ${esc(state.current.project.domain)},
+      so the export and the live checks are directional evidence, not a like-for-like comparison. A query in the Bing export can
+      still come back "not cited" on the live Copilot check: answers vary run to run, and the export covers months of them.
+      <b>Click any row</b> to see exactly which sites and pages each AI cited, including the competitors winning answers you are missing from.</p>
       ${runs.length > 1 ? `<h3>Previous runs</h3><p>${runs.map((r) => `<button class="secondary sm" data-run="${r.id}">${r.id} (${r.status})</button>`).join(" ")}</p>` : ""}
     </div>`;
   el.querySelectorAll("[data-run]").forEach((b) => (b.onclick = () => showRun(b.dataset.run)));
