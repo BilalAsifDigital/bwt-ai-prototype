@@ -1,0 +1,11 @@
+[build]
+  publish = "site"
+  functions = "netlify/functions"
+
+[functions]
+  node_bundler = "esbuild"
+
+# Cloro monitor calls can take 60-90s. Synchronous Netlify functions cap at
+# ~26s, so run execution uses a background function (paid plans) named with
+# the "-background" suffix; the sync fallback path runs one provider at a
+# time and tolerates timeouts.

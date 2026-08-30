@@ -1,0 +1,14 @@
+{
+  "name": "bwt-ai-prototype",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Prototype: turn Bing Webmaster Tools AI Performance exports into tracked queries and check citations across other LLM surfaces (via Cloro).",
+  "scripts": {
+    "test": "node test/run.mjs",
+    "dev": "netlify dev"
+  },
+  "dependencies": {
+    "@netlify/blobs": "^8.1.0"
+  }
+}
