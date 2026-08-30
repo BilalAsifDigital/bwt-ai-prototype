@@ -85,9 +85,11 @@
   .tile .n { font-size: 24px; font-weight: 700; color: var(--gray-800); }
   .tile .l { color: var(--gray-600); font-size: 12px; margin-top: 2px; }
 
-  .tabs { display: flex; gap: 22px; margin-bottom: 22px; border-bottom: 1px solid var(--gray-200); }
+  .tabs { display: flex; gap: 22px; margin-bottom: 22px; border-bottom: 1px solid var(--gray-200);
+          overflow-x: auto; }
   .tabs button { background: none; color: var(--gray-600); border: 0; border-bottom: 2px solid transparent;
-                 border-radius: 0; padding: 0 2px 12px; height: auto; font-weight: 500; font-size: 14px; }
+                 border-radius: 0; padding: 0 2px 12px; height: auto; font-weight: 500; font-size: 14px;
+                 white-space: nowrap; }
   .tabs button:hover { background: none; color: var(--gray-800); }
   .tabs button.active { color: var(--brand); border-bottom-color: var(--brand); font-weight: 600; }
 
@@ -111,6 +113,21 @@
   .auth-card { background: var(--card); border: 1px solid var(--gray-200); border-radius: 12px;
                box-shadow: var(--card-shadow); padding: 34px; width: 400px; }
   .auth-card .logo { margin-bottom: 18px; }
+
+  /* inline-editable suggestion text */
+  input.qedit { border: 1px solid transparent; border-radius: 6px; height: 30px; padding: 0 8px;
+                font: 500 13px 'Inter', sans-serif; width: 100%; min-width: 220px;
+                background: transparent; color: var(--gray-800); }
+  input.qedit:hover { border-color: var(--gray-300); background: var(--card); }
+  input.qedit:focus { border-color: var(--gray-500); background: var(--card); outline: none; }
+
+  /* trend chart */
+  .chart-wrap { position: relative; }
+  .chart-tip { position: absolute; pointer-events: none; background: var(--gray-800); color: #fff;
+               font-size: 12px; padding: 6px 10px; border-radius: 6px; white-space: nowrap;
+               transform: translate(-50%, -130%); display: none; z-index: 5; }
+  .minibar { height: 4px; border-radius: 4px; background: var(--primary); min-width: 2px; }
+  .minitrack { background: var(--gray-200); border-radius: 4px; height: 4px; width: 160px; }
 </style>
 </head>
 <body>
@@ -132,16 +149,18 @@ const PROVIDER_LABELS = {
   openai: "ChatGPT", perplexity: "Perplexity", gemini: "Gemini",
   google_ai_mode: "Google AI Mode", google_ai_overview: "AI Overviews",
 };
+const INTENTS = ["informational", "commercial", "transactional", "navigational"];
 
 const state = {
   passcode: localStorage.getItem("proto_passcode") || "",
   projects: [], current: null,
   suggestions: [], selected: new Set(),
-  run: null, tab: "import", minCitations: 20,
+  run: null, tab: "overview", minCitations: 20, showAllPages: false,
 };
 
 const app = document.getElementById("app");
 const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+const domainOf = (u) => { try { return new URL(u).hostname.replace(/^www\./, ""); } catch { return u; } };
 function toast(msg, ms = 2600) {
   const t = document.getElementById("toast");
   t.textContent = msg; t.style.display = "block";
@@ -155,6 +174,20 @@ async function api(path, opts = {}) {
   });
   if (res.status === 401) { renderPasscode(); throw new Error("unauthorized"); }
   return res;
+}
+
+async function saveTracked(tracked) {
+  const res = await api("/api/projects/import", { method: "POST",
+    body: JSON.stringify({ projectId: state.current.project.id, tracked }) });
+  return res.ok;
+}
+
+// Bing export period, e.g. "May 30 – Aug 26, 2026" (from the overview report when present)
+function bingPeriod() {
+  const o = state.current?.data?.overview || [];
+  if (!o.length) return "the export period";
+  const fmt = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  return `${fmt(o[0].date)} – ${fmt(o[o.length - 1].date)}`;
 }
 
 // ---------- views ----------
@@ -239,8 +272,8 @@ async function createProject(demo) {
 async function openProject(id) {
   const res = await api(`/api/projects?id=${id}`);
   state.current = await res.json();
-  state.suggestions = []; state.selected = new Set(); state.run = null;
-  state.tab = state.current.data ? (state.current.tracked.length ? "run" : "suggest") : "import";
+  state.suggestions = []; state.selected = new Set(); state.run = null; state.showAllPages = false;
+  state.tab = state.current.data ? "overview" : "import";
   renderProject();
 }
 
@@ -248,6 +281,7 @@ function renderProject() {
   const { project } = state.current;
   document.getElementById("who").textContent = `${project.name} · ${project.domain}`;
   const tabs = [
+    ["overview", "Overview"],
     ["import", "1 · Import Bing data"],
     ["suggest", "2 · Suggested queries"],
     ["run", "3 · Run across LLMs"],
@@ -260,10 +294,109 @@ function renderProject() {
   document.getElementById("back").onclick = (e) => { e.preventDefault(); loadProjects(); };
   app.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { state.tab = b.dataset.tab; renderProject(); }));
   const body = document.getElementById("tabbody");
+  if (state.tab === "overview") renderOverview(body);
   if (state.tab === "import") renderImport(body);
   if (state.tab === "suggest") renderSuggest(body);
   if (state.tab === "run") renderRun(body);
   if (state.tab === "results") renderResults(body);
+}
+
+// ---- tab 0: overview (Bing data at a glance) ----
+function renderOverview(el) {
+  const d = state.current.data;
+  if (!d) { el.innerHTML = `<div class="panel"><p>No Bing data yet. Start with step 1: Import.</p></div>`; return; }
+  const totalCit = d.overview.reduce((s, r) => s + r.citations, 0);
+  const pagesCited = d.pages.length;
+  const domain = state.current.project.domain;
+  const pages = [...d.pages].sort((a, b) => b.citations - a.citations);
+  const maxPage = pages.length ? pages[0].citations : 1;
+  const shown = state.showAllPages ? pages : pages.slice(0, 15);
+  const pathOf = (u) => { try { const x = new URL(u); return (x.hostname.replace(/^www\./, "") === domain ? "" : x.hostname) + x.pathname; } catch { return u; } };
+
+  el.innerHTML = `
+    <div class="tiles" style="margin-bottom:20px">
+      <div class="tile"><div class="n">${totalCit.toLocaleString()}</div><div class="l">Copilot/Bing citations (${bingPeriod()})</div></div>
+      <div class="tile"><div class="n">${d.queries.length.toLocaleString()}</div><div class="l">grounding queries that cited you</div></div>
+      <div class="tile"><div class="n">${pagesCited.toLocaleString()}</div><div class="l">pages earning citations</div></div>
+      <div class="tile"><div class="n">${state.current.tracked.length}</div><div class="l">queries tracked in this tool</div></div>
+    </div>
+    ${d.overview.length ? `<div class="panel">
+      <h2>Daily citations on Microsoft AI surfaces</h2>
+      <div class="chart-wrap" id="trend"></div>
+    </div>` : ""}
+    <div class="panel">
+      <h2>Which pages earn your citations</h2>
+      <p class="muted small">From the Bing pages export. The bar compares each page against your most-cited page.</p>
+      <div class="scroll"><table>
+        <tr><th>Page</th><th>Citations</th><th></th></tr>
+        ${shown.map((p) => `<tr>
+          <td style="max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+            <a href="${esc(p.page)}" target="_blank" rel="noopener">${esc(pathOf(p.page))}</a></td>
+          <td>${p.citations.toLocaleString()}</td>
+          <td><div class="minitrack"><div class="minibar" style="width:${Math.max(1, Math.round(p.citations / maxPage * 100))}%"></div></div></td>
+        </tr>`).join("")}
+      </table></div>
+      ${pages.length > 15 ? `<p><button class="secondary sm" id="togglepages">${state.showAllPages ? "Show top 15" : `Show all ${pages.length} pages`}</button></p>` : ""}
+    </div>`;
+  const tp = document.getElementById("togglepages");
+  if (tp) tp.onclick = () => { state.showAllPages = !state.showAllPages; renderProject(); };
+  if (d.overview.length) drawTrend(document.getElementById("trend"), d.overview);
+}
+
+// Single-series line chart, SVG, with crosshair + tooltip on hover.
+function drawTrend(mount, rows) {
+  const W = Math.min(1180, mount.clientWidth || 900), H = 220;
+  const padL = 46, padR = 16, padT = 14, padB = 26;
+  const pts = rows.map((r) => ({ t: new Date(r.date + "T00:00:00").getTime(), v: r.citations, date: r.date }));
+  const t0 = pts[0].t, t1 = pts[pts.length - 1].t;
+  const vMaxRaw = Math.max(...pts.map((p) => p.v));
+  const step = Math.pow(10, Math.floor(Math.log10(vMaxRaw)));
+  const vMax = Math.ceil(vMaxRaw / step) * step;
+  const X = (t) => padL + (t - t0) / (t1 - t0 || 1) * (W - padL - padR);
+  const Y = (v) => padT + (1 - v / vMax) * (H - padT - padB);
+  const path = pts.map((p, i) => `${i ? "L" : "M"}${X(p.t).toFixed(1)},${Y(p.v).toFixed(1)}`).join("");
+  const yTicks = [0, vMax / 2, vMax];
+  const months = [];
+  for (const p of pts) {
+    const m = p.date.slice(0, 7);
+    if (!months.length || months[months.length - 1].m !== m) months.push({ m, t: p.t });
+  }
+  // drop a month label that would collide with its neighbor (e.g. a period starting May 30)
+  for (let i = months.length - 1; i > 0; i--) {
+    if (X(months[i].t) - X(months[i - 1].t) < 44) months.splice(i - 1, 1);
+  }
+  const fmtM = (m) => new Date(m + "-01T00:00:00").toLocaleDateString("en-US", { month: "short" });
+  mount.innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" width="100%" role="img" aria-label="Daily Copilot and Bing citations over time">
+      ${yTicks.map((v) => `<line x1="${padL}" y1="${Y(v)}" x2="${W - padR}" y2="${Y(v)}" stroke="#E9ECEF" stroke-width="1"/>
+        <text x="${padL - 8}" y="${Y(v) + 4}" text-anchor="end" font-size="11" fill="#ADB5BD">${v.toLocaleString()}</text>`).join("")}
+      ${months.map((mo) => `<text x="${X(mo.t)}" y="${H - 8}" font-size="11" fill="#ADB5BD">${fmtM(mo.m)}</text>`).join("")}
+      <path d="${path}" fill="none" stroke="#0554F2" stroke-width="2" stroke-linejoin="round"/>
+      <circle id="tr-dot" r="4" fill="#0554F2" stroke="#ffffff" stroke-width="2" style="display:none"/>
+      <line id="tr-x" y1="${padT}" y2="${H - padB}" stroke="#CED4DA" stroke-width="1" style="display:none"/>
+      <rect x="${padL}" y="${padT}" width="${W - padL - padR}" height="${H - padT - padB}" fill="transparent" id="tr-hover"/>
+    </svg>
+    <div class="chart-tip" id="tr-tip"></div>`;
+  const svg = mount.querySelector("svg"), hover = mount.querySelector("#tr-hover"),
+        dot = mount.querySelector("#tr-dot"), xline = mount.querySelector("#tr-x"),
+        tip = mount.querySelector("#tr-tip");
+  const fmtD = (iso) => new Date(iso + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  hover.addEventListener("mousemove", (e) => {
+    const box = svg.getBoundingClientRect();
+    const sx = (e.clientX - box.left) * (W / box.width);
+    let best = pts[0], bd = Infinity;
+    for (const p of pts) { const dd = Math.abs(X(p.t) - sx); if (dd < bd) { bd = dd; best = p; } }
+    dot.style.display = xline.style.display = "block";
+    dot.setAttribute("cx", X(best.t)); dot.setAttribute("cy", Y(best.v));
+    xline.setAttribute("x1", X(best.t)); xline.setAttribute("x2", X(best.t));
+    tip.style.display = "block";
+    tip.style.left = (X(best.t) / W * box.width) + "px";
+    tip.style.top = (Y(best.v) / H * box.height) + "px";
+    tip.textContent = `${fmtD(best.date)}: ${best.v.toLocaleString()} citations`;
+  });
+  hover.addEventListener("mouseleave", () => {
+    dot.style.display = xline.style.display = tip.style.display = "none";
+  });
 }
 
 // ---- tab 1: import ----
@@ -313,14 +446,17 @@ function renderSuggest(el) {
   if (!state.suggestions.length) {
     state.suggestions = buildSuggestions(d.queries, { maxSuggestions: 60, minCitations: state.minCitations,
       existingQueries: state.current.tracked.map((t) => t.query) });
+    state.selected = new Set();
     state.suggestions.forEach((s, i) => { if (i < 10) state.selected.add(s.groundingQuery); });
   }
   const sugg = state.suggestions;
   el.innerHTML = `
     <div class="panel">
       <h2>Suggested queries from Bing grounding data</h2>
-      <p class="muted small">Ranked by citation volume and citation share, near-duplicates folded together.
-      Top 10 pre-selected. ${state.current.tracked.length ? `Already tracking ${state.current.tracked.length} queries (excluded).` : ""}</p>
+      <p class="muted small">Ranked by citation volume and <b>citation share</b> (the percentage of all citations for that query
+      that went to your domain, on Microsoft AI surfaces during ${bingPeriod()}). Near-duplicate queries are folded together
+      and the top 10 are pre-selected. <b>Click any query text to edit it before tracking.</b>
+      ${state.current.tracked.length ? `Already tracking ${state.current.tracked.length} queries (excluded here).` : ""}</p>
       <div class="row" style="margin-bottom:14px">
         <div><label>Min citations</label><input type="number" id="minc" value="${state.minCitations}" style="width:90px"></div>
         <button class="secondary" id="rebuild">Rebuild</button>
@@ -328,15 +464,15 @@ function renderSuggest(el) {
         <button id="track">Track selected (<span id="selcount">${state.selected.size}</span>)</button>
       </div>
       <div class="scroll"><table>
-        <tr><th></th><th>Query to track</th><th>Bing grounding query</th><th>Intent</th><th>Citations</th><th>Share</th><th></th></tr>
-        ${sugg.map((s) => `<tr>
+        <tr><th></th><th>Query to track (click to edit)</th><th>Bing grounding query</th><th>Intent</th><th>Citations</th><th>Citation share</th><th></th></tr>
+        ${sugg.map((s, i) => `<tr>
           <td><input type="checkbox" data-q="${esc(s.groundingQuery)}" ${state.selected.has(s.groundingQuery) ? "checked" : ""}></td>
-          <td style="font-weight:500">${esc(s.suggestedQuery)}${s.duplicates ? `<div class="muted small" style="font-weight:400">+${s.duplicates.length} similar variants folded</div>` : ""}</td>
+          <td><input class="qedit" data-qi="${i}" value="${esc(s.suggestedQuery)}">${s.duplicates ? `<div class="muted small">+${s.duplicates.length} similar variants folded</div>` : ""}</td>
           <td class="muted">${esc(s.groundingQuery)}</td>
           <td>${esc(s.wellowsIntent)}</td>
           <td>${(s.citationsCluster ?? s.citations).toLocaleString()}</td>
           <td>${s.citationShare != null ? s.citationShare + "%" : "–"}</td>
-          <td>${s.status === "rewrite" ? `<span class="pill warn">rewritten</span>` : `<span class="pill mut">as-is</span>`}</td>
+          <td>${s.status === "rewrite" ? `<span class="pill warn" title="Machine-style retrieval phrase rewritten into a natural prompt. Edit it if it reads wrong.">rewritten</span>` : `<span class="pill mut">as-is</span>`}</td>
         </tr>`).join("")}
       </table></div>
     </div>`;
@@ -344,21 +480,22 @@ function renderSuggest(el) {
     cb.checked ? state.selected.add(cb.dataset.q) : state.selected.delete(cb.dataset.q);
     document.getElementById("selcount").textContent = state.selected.size;
   }));
+  el.querySelectorAll("input.qedit").forEach((inp) => (inp.onchange = () => {
+    state.suggestions[Number(inp.dataset.qi)].suggestedQuery = inp.value.trim();
+  }));
   document.getElementById("rebuild").onclick = () => {
     state.minCitations = Number(document.getElementById("minc").value) || 1;
     state.suggestions = []; state.selected = new Set(); renderProject();
   };
   document.getElementById("track").onclick = async () => {
-    const chosen = sugg.filter((s) => state.selected.has(s.groundingQuery));
+    const chosen = sugg.filter((s) => state.selected.has(s.groundingQuery) && s.suggestedQuery);
     if (!chosen.length) return toast("Select at least one query");
     const tracked = [
       ...state.current.tracked,
       ...chosen.map((s) => ({ query: s.suggestedQuery, intent: s.wellowsIntent, sourceGroundingQuery: s.groundingQuery,
         bingCitations: s.citationsCluster ?? s.citations, bingCitationShare: s.citationShare })),
     ];
-    const res = await api("/api/projects/import", { method: "POST",
-      body: JSON.stringify({ projectId: state.current.project.id, tracked }) });
-    if (!res.ok) return toast("save failed");
+    if (!(await saveTracked(tracked))) return toast("save failed");
     toast(`Tracking ${tracked.length} queries`);
     await openProject(state.current.project.id);
     state.tab = "run"; renderProject();
@@ -368,10 +505,9 @@ function renderSuggest(el) {
 // ---- tab 3: run ----
 function renderRun(el) {
   const tracked = state.current.tracked;
-  if (!tracked.length) { el.innerHTML = `<div class="panel"><p>No tracked queries yet. Accept some suggestions (step 2).</p></div>`; return; }
   const providers = Object.entries(PROVIDER_LABELS);
   el.innerHTML = `
-    <div class="panel">
+    ${tracked.length ? `<div class="panel">
       <h2>Run tracked queries across AI surfaces</h2>
       <p class="muted small">Each selected query is asked live on each provider (the same monitoring pipeline Wellows uses in production)
       and the answer's citations are checked for <b>${esc(state.current.project.domain)}</b>. Capped at 20 queries per run.</p>
@@ -384,17 +520,44 @@ function renderRun(el) {
         <button id="start">Start run</button>
       </div>
       <div id="progress"></div>
-    </div>
+    </div>` : `<div class="panel"><p style="margin:0">No tracked queries yet. Accept suggestions in step 2, or add your own below.</p></div>`}
     <div class="panel">
       <h2>Tracked queries (${tracked.length})</h2>
-      <div class="scroll"><table>
-        <tr><th>Query</th><th>Intent</th><th>Bing citations</th><th>Bing share</th></tr>
-        ${tracked.map((t) => `<tr><td style="font-weight:500">${esc(t.query)}</td><td>${esc(t.intent)}</td>
+      <div class="row" style="margin-bottom:14px">
+        <div style="flex:1;min-width:260px"><label>Add your own query</label>
+          <input type="text" id="cq-text" placeholder="e.g. best AI visibility platform for agencies" style="width:100%"></div>
+        <div><label>Intent</label><select id="cq-intent">${INTENTS.map((i) => `<option>${i}</option>`).join("")}</select></div>
+        <button id="cq-add">Add query</button>
+      </div>
+      ${tracked.length ? `<div class="scroll"><table>
+        <tr><th>Query</th><th>Intent</th><th>Source</th><th>Bing citations</th><th>Bing share</th><th></th></tr>
+        ${tracked.map((t, i) => `<tr><td style="font-weight:500">${esc(t.query)}</td><td>${esc(t.intent)}</td>
+          <td class="muted small">${t.sourceGroundingQuery ? "Bing suggestion" : "added manually"}</td>
           <td>${t.bingCitations ? t.bingCitations.toLocaleString() : "–"}</td>
-          <td>${t.bingCitationShare != null ? t.bingCitationShare + "%" : "–"}</td></tr>`).join("")}
-      </table></div>
+          <td>${t.bingCitationShare != null ? t.bingCitationShare + "%" : "–"}</td>
+          <td><button class="secondary sm" data-rm="${i}">Remove</button></td></tr>`).join("")}
+      </table></div>` : ""}
     </div>`;
-  document.getElementById("start").onclick = async () => {
+  document.getElementById("cq-add").onclick = async () => {
+    const q = document.getElementById("cq-text").value.trim();
+    if (!q) return toast("Type a query first");
+    if (tracked.some((t) => t.query.toLowerCase() === q.toLowerCase())) return toast("Already tracking that query");
+    const next = [...tracked, { query: q, intent: document.getElementById("cq-intent").value,
+      sourceGroundingQuery: null, bingCitations: null, bingCitationShare: null }];
+    if (!(await saveTracked(next))) return toast("save failed");
+    toast("Query added");
+    await openProject(state.current.project.id);
+    state.tab = "run"; renderProject();
+  };
+  el.querySelectorAll("[data-rm]").forEach((b) => (b.onclick = async () => {
+    const next = tracked.filter((_, i) => i !== Number(b.dataset.rm));
+    if (!(await saveTracked(next))) return toast("save failed");
+    toast("Removed");
+    await openProject(state.current.project.id);
+    state.tab = "run"; renderProject();
+  }));
+  const start = document.getElementById("start");
+  if (start) start.onclick = async () => {
     const topn = Number(document.getElementById("topn").value) || 5;
     const provs = [...el.querySelectorAll("[data-p]:checked")].map((c) => c.dataset.p);
     if (!provs.length) return toast("Pick at least one provider");
@@ -449,33 +612,83 @@ function renderResults(el) {
   const qTotal = byQuery.size;
   el.innerHTML = `
     <div class="panel">
-      <h2>Citation coverage <span class="muted small" style="font-weight:400">run ${esc(run.id)} · ${esc(run.startedAt.slice(0, 16).replace("T", " "))} · ${run.status}</span></h2>
+      <div class="row" style="align-items:center;margin-bottom:4px">
+        <h2 style="margin:0">Citation coverage <span class="muted small" style="font-weight:400">run ${esc(run.id)} · ${esc(run.startedAt.slice(0, 16).replace("T", " "))} · ${run.status}</span></h2>
+        <span style="flex:1"></span>
+        <button class="secondary sm" id="exportcsv">Download CSV</button>
+      </div>
       <div class="tiles" style="margin:16px 0 20px">
         <div class="tile"><div class="n">${qTotal}</div><div class="l">queries checked</div></div>
-        <div class="tile"><div class="n" style="color:var(--success)">${qTotal}/${qTotal}</div><div class="l">cited on Copilot/Bing (source)</div></div>
-        ${provs.map((p) => `<div class="tile"><div class="n">${citedCount(p)}/${qTotal}</div><div class="l">cited on ${PROVIDER_LABELS[p]}</div></div>`).join("")}
+        <div class="tile"><div class="n" style="color:var(--success)">${qTotal}/${qTotal}</div><div class="l">cited on Copilot/Bing (${bingPeriod()})</div></div>
+        ${provs.map((p) => `<div class="tile"><div class="n">${citedCount(p)}/${qTotal}</div><div class="l">cited on ${PROVIDER_LABELS[p]} (live check)</div></div>`).join("")}
       </div>
       <div class="scroll"><table>
         <tr><th>Query</th><th>Copilot/Bing</th>${provs.map((p) => `<th>${PROVIDER_LABELS[p]}</th>`).join("")}</tr>
-        ${[...byQuery.entries()].map(([q, cells]) => `<tr>
-          <td style="font-weight:500">${esc(q)}</td>
+        ${[...byQuery.entries()].map(([q, cells], qi) => `<tr class="qrow" data-qi="${qi}" style="cursor:pointer">
+          <td style="font-weight:500">${esc(q)} <span class="muted small">▾</span></td>
           <td><span class="pill ok">cited</span></td>
           ${provs.map((p) => {
             const r = cells[p];
             if (!r) return `<td><span class="pill mut">pending</span></td>`;
-            if (!r.ok) return `<td><span class="pill warn" title="${esc(r.error)}">error</span></td>`;
+            if (!r.ok) return `<td><span class="pill warn">error</span></td>`;
             return r.cited
-              ? `<td><span class="pill ok" title="${esc(r.citedUrls.join("\n"))}">cited</span></td>`
+              ? `<td><span class="pill ok">cited</span></td>`
               : `<td><span class="pill bad">not cited</span></td>`;
           }).join("")}
-        </tr>`).join("")}
+        </tr>
+        <tr class="qdetail" data-qd="${qi}" hidden><td colspan="${provs.length + 2}" style="background:var(--gray-100);padding:16px 20px">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">
+          ${provs.map((p) => {
+            const r = cells[p];
+            let body;
+            if (!r) body = `<span class="muted small">pending</span>`;
+            else if (!r.ok) body = `<span class="err small">${esc(r.error || "failed")}</span>`;
+            else if (!(r.allCitations || []).length) body = `<span class="muted small">answer cited no web sources</span>`;
+            else body = (r.allCitations || []).map((u) => {
+              const mine = (r.citedUrls || []).includes(u);
+              return `<div class="small" style="margin-bottom:4px">${mine
+                ? `<span class="pill ok" style="padding:1px 7px">you</span> `
+                : ``}<a href="${esc(u)}" target="_blank" rel="noopener">${esc(domainOf(u))}</a></div>`;
+            }).join("");
+            return `<div><div class="small" style="font-weight:600;color:var(--gray-700);margin-bottom:6px">${PROVIDER_LABELS[p]} cited:</div>${body}</div>`;
+          }).join("")}
+          </div>
+        </td></tr>`).join("")}
       </table></div>
-      <p class="muted small" style="margin-bottom:0">"Copilot/Bing: cited" comes from your Bing Webmaster Tools export. These queries were selected because
-      Copilot already cites this domain for them. The other columns are live checks of each answer's cited sources,
-      matched against ${esc(state.current.project.domain)}. Hover a green badge to see the cited URLs.</p>
+      <p class="muted small" style="margin-bottom:0">"Copilot/Bing: cited" is from your Bing Webmaster Tools export, an aggregate over ${bingPeriod()};
+      the other columns are single live checks of each answer's cited sources, matched against ${esc(state.current.project.domain)},
+      so the two are directional evidence, not a like-for-like comparison.
+      <b>Click any row</b> to see exactly which sites each AI cited, including the competitors winning answers you are missing from.</p>
       ${runs.length > 1 ? `<h3>Previous runs</h3><p>${runs.map((r) => `<button class="secondary sm" data-run="${r.id}">${r.id} (${r.status})</button>`).join(" ")}</p>` : ""}
     </div>`;
   el.querySelectorAll("[data-run]").forEach((b) => (b.onclick = () => showRun(b.dataset.run)));
+  el.querySelectorAll(".qrow").forEach((row) => (row.onclick = () => {
+    const d = el.querySelector(`[data-qd="${row.dataset.qi}"]`);
+    if (d) d.hidden = !d.hidden;
+  }));
+  document.getElementById("exportcsv").onclick = () => {
+    const csvCell = (v) => `"${String(v ?? "").replace(/"/g, '""')}"`;
+    const head = ["query", "copilot_bing", ...provs.flatMap((p) => [`${p}_status`, `${p}_your_cited_urls`, `${p}_all_cited_domains`])];
+    const lines = [head.map(csvCell).join(",")];
+    for (const [q, cells] of byQuery.entries()) {
+      const row = [q, "cited (Bing export)"];
+      for (const p of provs) {
+        const r = cells[p];
+        if (!r) row.push("pending", "", "");
+        else if (!r.ok) row.push(`error: ${r.error || "failed"}`, "", "");
+        else row.push(r.cited ? "cited" : "not cited",
+          (r.citedUrls || []).join(" "),
+          (r.allCitations || []).map(domainOf).join(" "));
+      }
+      lines.push(row.map(csvCell).join(","));
+    }
+    const blob = new Blob(["﻿" + lines.join("\r\n")], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `ai-citation-coverage-${state.current.project.domain}-run-${run.id}.csv`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
 }
 
 // ---------- boot ----------
