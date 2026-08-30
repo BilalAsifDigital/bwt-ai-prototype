@@ -1,0 +1,491 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wellows · AI Performance</title>
+<link rel="icon" href="logo.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Wellows design tokens (from platform-frontend tailwind.config.mjs, light theme) */
+  :root {
+    --canvas: #F7FAFC;
+    --card: #ffffff;
+    --gray-100: #F8F9FA; --gray-200: #E9ECEF; --gray-300: #DBDFE9; --gray-400: #CED4DA;
+    --gray-500: #ADB5BD; --gray-600: #6C757D; --gray-700: #4B5675; --gray-800: #252F4A;
+    --gray-900: #212529;
+    --brand: #FF6F1E; --brand-active: #F15700; --brand-light: #FFF5EF;
+    --primary: #0554F2; --primary-light: #E6EEFE;
+    --success: #15803D; --success-light: #E8F2EC;
+    --danger: #B63936; --danger-light: #FCF0EF;
+    --warning: #F59E0B; --warning-light: #FEF3C7; --warning-ink: #4B3005;
+    --card-shadow: 0px 3px 4px 0px rgba(0, 0, 0, 0.03);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--canvas); color: var(--gray-800);
+         font: 400 14px/1.5 'Inter', -apple-system, sans-serif; }
+
+  header { background: var(--card); border-bottom: 1px solid var(--gray-200); height: 70px;
+           padding: 0 30px; display: flex; align-items: center; gap: 14px; }
+  header .logo { display: flex; align-items: center; }
+  header .logo img { height: 22px; display: block; }
+  header .divider { width: 1px; height: 24px; background: var(--gray-300); }
+  header .app-name { font-size: 14px; font-weight: 600; color: var(--gray-800); }
+  header .tag { color: var(--brand); background: var(--brand-light); font-size: 11px;
+                font-weight: 600; border-radius: 4px; padding: 3px 8px; letter-spacing: .02em;
+                text-transform: uppercase; }
+  main { max-width: 1280px; margin: 0 auto; padding: 30px 30px 60px; }
+
+  .panel { background: var(--card); border: 1px solid var(--gray-200); border-radius: 12px;
+           box-shadow: var(--card-shadow); padding: 22px 26px; margin-bottom: 20px; }
+  h2 { font-size: 15px; font-weight: 600; color: var(--gray-800); margin: 0 0 12px; }
+  h3 { font-size: 11px; font-weight: 600; margin: 20px 0 10px; color: var(--gray-600);
+       text-transform: uppercase; letter-spacing: .06em; }
+  p { color: var(--gray-700); }
+
+  button { background: var(--brand); color: #fff; border: 0; border-radius: 8px;
+           height: 40px; padding: 0 16px; font: 500 14px 'Inter', sans-serif; cursor: pointer;
+           transition: background .15s; }
+  button:hover { background: var(--brand-active); }
+  button.secondary { background: var(--card); color: var(--gray-700);
+                     border: 1px solid var(--gray-300); }
+  button.secondary:hover { background: var(--gray-100); }
+  button:disabled { opacity: .5; cursor: default; }
+  button.sm { height: 32px; font-size: 13px; padding: 0 12px; }
+
+  input[type=text], input[type=password], input[type=number], select {
+    border: 1px solid var(--gray-300); border-radius: 8px; height: 40px; padding: 0 12px;
+    font: 400 14px 'Inter', sans-serif; background: var(--card); color: var(--gray-800); }
+  input:focus { outline: none; border-color: var(--gray-500); }
+  input[type=file] { font: 400 13px 'Inter', sans-serif; color: var(--gray-700); }
+  label { font-size: 13px; color: var(--gray-600); display: block; margin-bottom: 5px; font-weight: 500; }
+  .row { display: flex; gap: 14px; flex-wrap: wrap; align-items: flex-end; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 13px; }
+  th { text-align: left; color: var(--gray-700); font-weight: 600; font-size: 12px;
+       padding: 12px 16px; background: var(--gray-100); border-bottom: 1px solid var(--gray-200);
+       white-space: nowrap; }
+  th:first-child { border-radius: 8px 0 0 8px; } th:last-child { border-radius: 0 8px 8px 0; }
+  td { padding: 11px 16px; border-bottom: 1px solid var(--gray-200); vertical-align: top;
+       color: var(--gray-800); }
+  tr:last-child td { border-bottom: 0; }
+  .scroll { overflow-x: auto; }
+
+  .pill { display: inline-block; border-radius: 4px; padding: 3px 10px; font-size: 12px; font-weight: 500; }
+  .pill.ok   { background: var(--success-light); color: var(--success); }
+  .pill.bad  { background: var(--danger-light);  color: var(--danger); }
+  .pill.warn { background: var(--warning-light); color: var(--warning-ink); }
+  .pill.mut  { background: var(--gray-100); color: var(--gray-600); }
+
+  .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 14px; }
+  .tile { border: 1px solid var(--gray-200); border-radius: 12px; padding: 16px 18px;
+          background: var(--card); box-shadow: var(--card-shadow); }
+  .tile .n { font-size: 24px; font-weight: 700; color: var(--gray-800); }
+  .tile .l { color: var(--gray-600); font-size: 12px; margin-top: 2px; }
+
+  .tabs { display: flex; gap: 22px; margin-bottom: 22px; border-bottom: 1px solid var(--gray-200); }
+  .tabs button { background: none; color: var(--gray-600); border: 0; border-bottom: 2px solid transparent;
+                 border-radius: 0; padding: 0 2px 12px; height: auto; font-weight: 500; font-size: 14px; }
+  .tabs button:hover { background: none; color: var(--gray-800); }
+  .tabs button.active { color: var(--brand); border-bottom-color: var(--brand); font-weight: 600; }
+
+  .muted { color: var(--gray-600); }
+  .small { font-size: 12px; }
+  .err { color: var(--danger); }
+  a { color: var(--primary); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  progress { width: 100%; height: 8px; appearance: none; -webkit-appearance: none; }
+  progress::-webkit-progress-bar { background: var(--gray-200); border-radius: 8px; }
+  progress::-webkit-progress-value { background: var(--brand); border-radius: 8px; }
+  progress::-moz-progress-bar { background: var(--brand); border-radius: 8px; }
+
+  #toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+           background: var(--gray-800); color: #fff; border-radius: 8px; padding: 11px 20px;
+           font-size: 13px; display: none; box-shadow: 0px 7px 18px rgba(0,0,0,.09); }
+
+  .auth-wrap { min-height: calc(100vh - 70px); display: flex; align-items: flex-start;
+               justify-content: center; padding-top: 10vh; }
+  .auth-card { background: var(--card); border: 1px solid var(--gray-200); border-radius: 12px;
+               box-shadow: var(--card-shadow); padding: 34px; width: 400px; }
+  .auth-card .logo { margin-bottom: 18px; }
+</style>
+</head>
+<body>
+<header>
+  <span class="logo"><img src="logo.svg" alt="Wellows"></span>
+  <span class="divider"></span>
+  <span class="app-name">AI Performance</span>
+  <span class="tag">Prototype</span>
+  <span id="who" class="muted small" style="margin-left:auto"></span>
+</header>
+<main id="app"><div class="panel">Loading…</div></main>
+<div id="toast"></div>
+
+<script type="module">
+import { detectReportType, parseQueriesReport, parsePagesReport, parseOverviewReport } from "./js/lib/parseBwt.mjs";
+import { buildSuggestions } from "./js/lib/suggest.mjs";
+
+const PROVIDER_LABELS = {
+  openai: "ChatGPT", perplexity: "Perplexity", gemini: "Gemini",
+  google_ai_mode: "Google AI Mode", google_ai_overview: "AI Overviews",
+};
+
+const state = {
+  passcode: localStorage.getItem("proto_passcode") || "",
+  projects: [], current: null,
+  suggestions: [], selected: new Set(),
+  run: null, tab: "import", minCitations: 20,
+};
+
+const app = document.getElementById("app");
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+function toast(msg, ms = 2600) {
+  const t = document.getElementById("toast");
+  t.textContent = msg; t.style.display = "block";
+  clearTimeout(t._h); t._h = setTimeout(() => (t.style.display = "none"), ms);
+}
+
+async function api(path, opts = {}) {
+  const res = await fetch(path, {
+    ...opts,
+    headers: { "Content-Type": "application/json", "X-Passcode": state.passcode, ...(opts.headers || {}) },
+  });
+  if (res.status === 401) { renderPasscode(); throw new Error("unauthorized"); }
+  return res;
+}
+
+// ---------- views ----------
+
+function renderPasscode() {
+  app.innerHTML = `
+    <div class="auth-wrap"><div class="auth-card">
+      <div class="logo"><img src="logo.svg" alt="Wellows" height="24"></div>
+      <h2>Enter passcode</h2>
+      <p class="muted small" style="margin-top:0">This preview is access protected. Ask the person who shared the link.</p>
+      <div class="row">
+        <input type="password" id="pc" placeholder="Passcode" style="flex:1">
+        <button id="go">Continue</button>
+      </div>
+    </div></div>`;
+  document.getElementById("go").onclick = async () => {
+    state.passcode = document.getElementById("pc").value.trim();
+    localStorage.setItem("proto_passcode", state.passcode);
+    await loadProjects();
+  };
+  document.getElementById("pc").onkeydown = (e) => { if (e.key === "Enter") document.getElementById("go").click(); };
+}
+
+async function loadProjects() {
+  const res = await api("/api/projects");
+  state.projects = (await res.json()).projects || [];
+  state.current = null;
+  renderHome();
+}
+
+function renderHome() {
+  document.getElementById("who").textContent = "";
+  app.innerHTML = `
+    <div class="panel" style="background:linear-gradient(90deg,#FFF5EF 0%,#ffffff 55%)">
+      <h2>See where AI cites you, beyond Bing</h2>
+      <p style="max-width:760px">Bing Webmaster Tools reveals which <b>grounding queries</b> made Copilot cite your site.
+      This tool turns those into <b>tracked queries</b> and checks, live, whether
+      <b>ChatGPT, Perplexity, Gemini, Google AI Mode and AI Overviews</b> cite you for the same questions.
+      Bing shows where you already win. The run shows where you don't, yet.</p>
+    </div>
+    <div class="panel">
+      <h2>Projects</h2>
+      ${state.projects.length ? `<div class="scroll"><table>
+        <tr><th>Name</th><th>Domain</th><th>Region</th><th>Created</th><th></th></tr>
+        ${state.projects.map((p) => `<tr>
+          <td style="font-weight:500">${esc(p.name)}</td><td>${esc(p.domain)}</td><td>${esc(p.region.toUpperCase())}</td>
+          <td class="muted">${esc(p.createdAt.slice(0, 10))}</td>
+          <td><button class="secondary sm" data-open="${p.id}">Open</button></td></tr>`).join("")}
+      </table></div>` : `<p class="muted">No projects yet. Create one below, or load the demo.</p>`}
+      <h3>New project</h3>
+      <div class="row">
+        <div><label>Name</label><input type="text" id="np-name" placeholder="Wellows"></div>
+        <div><label>Domain</label><input type="text" id="np-domain" placeholder="wellows.com"></div>
+        <div><label>Region</label><input type="text" id="np-region" value="us" style="width:70px"></div>
+        <button id="np-create">Create project</button>
+        <button class="secondary" id="np-demo">Load demo (wellows.com)</button>
+      </div>
+    </div>`;
+  app.querySelectorAll("[data-open]").forEach((b) => (b.onclick = () => openProject(b.dataset.open)));
+  document.getElementById("np-create").onclick = () => createProject(false);
+  document.getElementById("np-demo").onclick = () => createProject(true);
+}
+
+async function createProject(demo) {
+  const body = demo
+    ? { name: "Wellows (demo)", domain: "wellows.com", region: "us" }
+    : { name: document.getElementById("np-name").value, domain: document.getElementById("np-domain").value, region: document.getElementById("np-region").value || "us" };
+  const res = await api("/api/projects", { method: "POST", body: JSON.stringify(body) });
+  const data = await res.json();
+  if (!res.ok) return toast(data.error || "failed");
+  if (demo) {
+    toast("Importing demo data…");
+    const [q, p, o] = await Promise.all(["queries", "pages", "overview"].map((f) => fetch(`/data/${f}.csv`).then((r) => r.text())));
+    await api("/api/projects/import", { method: "POST", body: JSON.stringify({
+      projectId: data.project.id,
+      queries: parseQueriesReport(q), pages: parsePagesReport(p), overview: parseOverviewReport(o),
+    }) });
+  }
+  await openProject(data.project.id);
+}
+
+async function openProject(id) {
+  const res = await api(`/api/projects?id=${id}`);
+  state.current = await res.json();
+  state.suggestions = []; state.selected = new Set(); state.run = null;
+  state.tab = state.current.data ? (state.current.tracked.length ? "run" : "suggest") : "import";
+  renderProject();
+}
+
+function renderProject() {
+  const { project } = state.current;
+  document.getElementById("who").textContent = `${project.name} · ${project.domain}`;
+  const tabs = [
+    ["import", "1 · Import Bing data"],
+    ["suggest", "2 · Suggested queries"],
+    ["run", "3 · Run across LLMs"],
+    ["results", "4 · Results"],
+  ];
+  app.innerHTML = `
+    <p style="margin-top:0"><a href="#" id="back">← All projects</a></p>
+    <div class="tabs">${tabs.map(([k, l]) => `<button data-tab="${k}" class="${state.tab === k ? "active" : ""}">${l}</button>`).join("")}</div>
+    <div id="tabbody"></div>`;
+  document.getElementById("back").onclick = (e) => { e.preventDefault(); loadProjects(); };
+  app.querySelectorAll("[data-tab]").forEach((b) => (b.onclick = () => { state.tab = b.dataset.tab; renderProject(); }));
+  const body = document.getElementById("tabbody");
+  if (state.tab === "import") renderImport(body);
+  if (state.tab === "suggest") renderSuggest(body);
+  if (state.tab === "run") renderRun(body);
+  if (state.tab === "results") renderResults(body);
+}
+
+// ---- tab 1: import ----
+function renderImport(el) {
+  const d = state.current.data;
+  el.innerHTML = `
+    <div class="panel">
+      <h2>Import Bing Webmaster Tools exports</h2>
+      <p class="muted small">In Bing Webmaster Tools open <b>AI Performance</b>, export the Queries and Pages views as CSV
+      (and optionally the overview trend), then upload the files here. Report type is detected automatically.</p>
+      ${d ? `<p><span class="pill ok">Imported</span>&nbsp; ${d.queries.length.toLocaleString()} grounding queries · ${d.pages.length} pages · ${d.overview.length} days
+        <span class="muted small">(${esc((d.importedAt || "").slice(0, 10))})</span></p>` : ""}
+      <div class="row">
+        <div style="flex:1"><label>CSV files (select up to 3)</label>
+          <input type="file" id="files" accept=".csv" multiple></div>
+        <button id="do-import">Import</button>
+      </div>
+      <p id="import-note" class="muted small"></p>
+    </div>`;
+  document.getElementById("do-import").onclick = async () => {
+    const files = [...document.getElementById("files").files];
+    if (!files.length) return toast("Choose the exported CSV files first");
+    const payload = { projectId: state.current.project.id };
+    const notes = [];
+    for (const f of files) {
+      const text = await f.text();
+      const { type } = detectReportType(text);
+      if (type === "queries") { payload.queries = parseQueriesReport(text); notes.push(`${f.name} → queries (${payload.queries.length})`); }
+      else if (type === "pages") { payload.pages = parsePagesReport(text); notes.push(`${f.name} → pages (${payload.pages.length})`); }
+      else if (type === "overview") { payload.overview = parseOverviewReport(text); notes.push(`${f.name} → trend (${payload.overview.length} days)`); }
+      else notes.push(`${f.name} → not recognized (skipped)`);
+    }
+    document.getElementById("import-note").textContent = notes.join(" · ");
+    if (!payload.queries) return toast("No AISearchQueriesReport found among the files");
+    const res = await api("/api/projects/import", { method: "POST", body: JSON.stringify(payload) });
+    const out = await res.json();
+    if (!res.ok) return toast(out.error || "import failed");
+    toast("Imported");
+    await openProject(state.current.project.id);
+  };
+}
+
+// ---- tab 2: suggestions ----
+function renderSuggest(el) {
+  const d = state.current.data;
+  if (!d) { el.innerHTML = `<div class="panel"><p>Import Bing data first (step 1).</p></div>`; return; }
+  if (!state.suggestions.length) {
+    state.suggestions = buildSuggestions(d.queries, { maxSuggestions: 60, minCitations: state.minCitations,
+      existingQueries: state.current.tracked.map((t) => t.query) });
+    state.suggestions.forEach((s, i) => { if (i < 10) state.selected.add(s.groundingQuery); });
+  }
+  const sugg = state.suggestions;
+  el.innerHTML = `
+    <div class="panel">
+      <h2>Suggested queries from Bing grounding data</h2>
+      <p class="muted small">Ranked by citation volume and citation share, near-duplicates folded together.
+      Top 10 pre-selected. ${state.current.tracked.length ? `Already tracking ${state.current.tracked.length} queries (excluded).` : ""}</p>
+      <div class="row" style="margin-bottom:14px">
+        <div><label>Min citations</label><input type="number" id="minc" value="${state.minCitations}" style="width:90px"></div>
+        <button class="secondary" id="rebuild">Rebuild</button>
+        <span style="flex:1"></span>
+        <button id="track">Track selected (<span id="selcount">${state.selected.size}</span>)</button>
+      </div>
+      <div class="scroll"><table>
+        <tr><th></th><th>Query to track</th><th>Bing grounding query</th><th>Intent</th><th>Citations</th><th>Share</th><th></th></tr>
+        ${sugg.map((s) => `<tr>
+          <td><input type="checkbox" data-q="${esc(s.groundingQuery)}" ${state.selected.has(s.groundingQuery) ? "checked" : ""}></td>
+          <td style="font-weight:500">${esc(s.suggestedQuery)}${s.duplicates ? `<div class="muted small" style="font-weight:400">+${s.duplicates.length} similar variants folded</div>` : ""}</td>
+          <td class="muted">${esc(s.groundingQuery)}</td>
+          <td>${esc(s.wellowsIntent)}</td>
+          <td>${(s.citationsCluster ?? s.citations).toLocaleString()}</td>
+          <td>${s.citationShare != null ? s.citationShare + "%" : "–"}</td>
+          <td>${s.status === "rewrite" ? `<span class="pill warn">rewritten</span>` : `<span class="pill mut">as-is</span>`}</td>
+        </tr>`).join("")}
+      </table></div>
+    </div>`;
+  el.querySelectorAll("[data-q]").forEach((cb) => (cb.onchange = () => {
+    cb.checked ? state.selected.add(cb.dataset.q) : state.selected.delete(cb.dataset.q);
+    document.getElementById("selcount").textContent = state.selected.size;
+  }));
+  document.getElementById("rebuild").onclick = () => {
+    state.minCitations = Number(document.getElementById("minc").value) || 1;
+    state.suggestions = []; state.selected = new Set(); renderProject();
+  };
+  document.getElementById("track").onclick = async () => {
+    const chosen = sugg.filter((s) => state.selected.has(s.groundingQuery));
+    if (!chosen.length) return toast("Select at least one query");
+    const tracked = [
+      ...state.current.tracked,
+      ...chosen.map((s) => ({ query: s.suggestedQuery, intent: s.wellowsIntent, sourceGroundingQuery: s.groundingQuery,
+        bingCitations: s.citationsCluster ?? s.citations, bingCitationShare: s.citationShare })),
+    ];
+    const res = await api("/api/projects/import", { method: "POST",
+      body: JSON.stringify({ projectId: state.current.project.id, tracked }) });
+    if (!res.ok) return toast("save failed");
+    toast(`Tracking ${tracked.length} queries`);
+    await openProject(state.current.project.id);
+    state.tab = "run"; renderProject();
+  };
+}
+
+// ---- tab 3: run ----
+function renderRun(el) {
+  const tracked = state.current.tracked;
+  if (!tracked.length) { el.innerHTML = `<div class="panel"><p>No tracked queries yet. Accept some suggestions (step 2).</p></div>`; return; }
+  const providers = Object.entries(PROVIDER_LABELS);
+  el.innerHTML = `
+    <div class="panel">
+      <h2>Run tracked queries across AI surfaces</h2>
+      <p class="muted small">Each selected query is asked live on each provider (the same monitoring pipeline Wellows uses in production)
+      and the answer's citations are checked for <b>${esc(state.current.project.domain)}</b>. Capped at 20 queries per run.</p>
+      <div class="row">
+        <div><label>Queries (top N by Bing citations)</label><input type="number" id="topn" value="${Math.min(5, tracked.length)}" min="1" max="20" style="width:80px"></div>
+        <div><label>Providers</label>
+          ${providers.map(([k, l]) => `<label style="display:inline-flex;gap:6px;margin-right:12px;color:var(--gray-800);font-weight:400;align-items:center">
+            <input type="checkbox" data-p="${k}" ${k === "openai" || k === "perplexity" || k === "gemini" ? "checked" : ""}>${l}</label>`).join("")}
+        </div>
+        <button id="start">Start run</button>
+      </div>
+      <div id="progress"></div>
+    </div>
+    <div class="panel">
+      <h2>Tracked queries (${tracked.length})</h2>
+      <div class="scroll"><table>
+        <tr><th>Query</th><th>Intent</th><th>Bing citations</th><th>Bing share</th></tr>
+        ${tracked.map((t) => `<tr><td style="font-weight:500">${esc(t.query)}</td><td>${esc(t.intent)}</td>
+          <td>${t.bingCitations ? t.bingCitations.toLocaleString() : "–"}</td>
+          <td>${t.bingCitationShare != null ? t.bingCitationShare + "%" : "–"}</td></tr>`).join("")}
+      </table></div>
+    </div>`;
+  document.getElementById("start").onclick = async () => {
+    const topn = Number(document.getElementById("topn").value) || 5;
+    const provs = [...el.querySelectorAll("[data-p]:checked")].map((c) => c.dataset.p);
+    if (!provs.length) return toast("Pick at least one provider");
+    const queries = [...tracked].sort((a, b) => (b.bingCitations || 0) - (a.bingCitations || 0)).slice(0, topn).map((t) => t.query);
+    const runId = crypto.randomUUID().slice(0, 8);
+    await api("/api/run", { method: "POST", body: JSON.stringify({
+      projectId: state.current.project.id, runId, queries, providers: provs, region: state.current.project.region }) });
+    toast("Run started");
+    pollRun(runId, queries.length * provs.length);
+  };
+}
+
+async function pollRun(runId, total) {
+  const prog = document.getElementById("progress");
+  if (prog) prog.innerHTML = `<p class="muted small">Running… roughly a minute per query-provider pair.</p><progress max="${total}" value="0"></progress>`;
+  const timer = setInterval(async () => {
+    try {
+      const res = await api(`/api/run-status?projectId=${state.current.project.id}&runId=${runId}`);
+      if (res.status === 404) return;
+      const { run } = await res.json();
+      state.run = run;
+      const bar = document.querySelector("#progress progress");
+      if (bar) bar.value = run.done;
+      if (run.status === "completed") {
+        clearInterval(timer);
+        toast("Run completed");
+        await openProject(state.current.project.id);
+        state.tab = "results"; renderProject();
+      }
+    } catch { /* transient poll error — keep polling */ }
+  }, 4000);
+}
+
+// ---- tab 4: results ----
+function renderResults(el) {
+  const runs = state.current.runs || [];
+  if (!state.run && !runs.length) { el.innerHTML = `<div class="panel"><p>No runs yet. Start one in step 3.</p></div>`; return; }
+  const showRun = async (id) => {
+    const res = await api(`/api/run-status?projectId=${state.current.project.id}&runId=${id}`);
+    state.run = (await res.json()).run; renderProject();
+  };
+  if (!state.run) { showRun(runs[0].id); el.innerHTML = `<div class="panel">Loading…</div>`; return; }
+
+  const run = state.run;
+  const byQuery = new Map();
+  for (const r of run.results) {
+    if (!byQuery.has(r.query)) byQuery.set(r.query, {});
+    byQuery.get(r.query)[r.provider] = r;
+  }
+  const provs = run.providers;
+  const citedCount = (p) => run.results.filter((r) => r.provider === p && r.cited).length;
+  const qTotal = byQuery.size;
+  el.innerHTML = `
+    <div class="panel">
+      <h2>Citation coverage <span class="muted small" style="font-weight:400">run ${esc(run.id)} · ${esc(run.startedAt.slice(0, 16).replace("T", " "))} · ${run.status}</span></h2>
+      <div class="tiles" style="margin:16px 0 20px">
+        <div class="tile"><div class="n">${qTotal}</div><div class="l">queries checked</div></div>
+        <div class="tile"><div class="n" style="color:var(--success)">${qTotal}/${qTotal}</div><div class="l">cited on Copilot/Bing (source)</div></div>
+        ${provs.map((p) => `<div class="tile"><div class="n">${citedCount(p)}/${qTotal}</div><div class="l">cited on ${PROVIDER_LABELS[p]}</div></div>`).join("")}
+      </div>
+      <div class="scroll"><table>
+        <tr><th>Query</th><th>Copilot/Bing</th>${provs.map((p) => `<th>${PROVIDER_LABELS[p]}</th>`).join("")}</tr>
+        ${[...byQuery.entries()].map(([q, cells]) => `<tr>
+          <td style="font-weight:500">${esc(q)}</td>
+          <td><span class="pill ok">cited</span></td>
+          ${provs.map((p) => {
+            const r = cells[p];
+            if (!r) return `<td><span class="pill mut">pending</span></td>`;
+            if (!r.ok) return `<td><span class="pill warn" title="${esc(r.error)}">error</span></td>`;
+            return r.cited
+              ? `<td><span class="pill ok" title="${esc(r.citedUrls.join("\n"))}">cited</span></td>`
+              : `<td><span class="pill bad">not cited</span></td>`;
+          }).join("")}
+        </tr>`).join("")}
+      </table></div>
+      <p class="muted small" style="margin-bottom:0">"Copilot/Bing: cited" comes from your Bing Webmaster Tools export. These queries were selected because
+      Copilot already cites this domain for them. The other columns are live checks of each answer's cited sources,
+      matched against ${esc(state.current.project.domain)}. Hover a green badge to see the cited URLs.</p>
+      ${runs.length > 1 ? `<h3>Previous runs</h3><p>${runs.map((r) => `<button class="secondary sm" data-run="${r.id}">${r.id} (${r.status})</button>`).join(" ")}</p>` : ""}
+    </div>`;
+  el.querySelectorAll("[data-run]").forEach((b) => (b.onclick = () => showRun(b.dataset.run)));
+}
+
+// ---------- boot ----------
+try {
+  await loadProjects();
+} catch (e) {
+  if (String(e.message) !== "unauthorized") {
+    app.innerHTML = `<div class="panel err">Failed to load: ${esc(e.message)}</div>`;
+  }
+}
+</script>
+</body>
+</html>
