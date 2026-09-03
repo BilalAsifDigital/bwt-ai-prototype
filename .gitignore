@@ -1,0 +1,13 @@
+# Secrets — never commit. Set CLORO_API_KEY etc. in Netlify site settings.
+.env
+.env.*
+!.env.example
+
+# Netlify CLI local state
+.netlify/
+
+# Dependencies (currently tracked by accident; remove with `git rm -r --cached node_modules`)
+node_modules/
+
+# OS / editor
+.DS_Store
