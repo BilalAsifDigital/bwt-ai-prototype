@@ -153,6 +153,7 @@ const INTENTS = ["informational", "commercial", "transactional", "navigational"]
 
 const state = {
   passcode: localStorage.getItem("proto_passcode") || "",
+  health: null, // /api/health result: which server-side pieces a live run depends on
   projects: [], current: null,
   suggestions: [], selected: new Set(),
   run: null, tab: "overview", minCitations: 20, showAllPages: false,
@@ -173,7 +174,29 @@ async function api(path, opts = {}) {
     headers: { "Content-Type": "application/json", "X-Passcode": state.passcode, ...(opts.headers || {}) },
   });
   if (res.status === 401) { renderPasscode(); throw new Error("unauthorized"); }
+  if (!res.ok && !(res.headers.get("content-type") || "").includes("json")) {
+    throw new Error(`HTTP ${res.status} from ${path} (no JSON body). The Netlify functions may not be deployed.`);
+  }
   return res;
+}
+
+// Providers the server can actually run (from /api/health), never the static label list.
+function runnableProviders() {
+  const list = state.health?.providers || Object.keys(PROVIDER_LABELS).filter((k) => k !== "copilot");
+  return list.filter((k) => PROVIDER_LABELS[k]);
+}
+
+// One-line banner explaining why live runs cannot work on this deployment, or "" when they can.
+function healthWarning() {
+  const h = state.health;
+  if (!h) return `<p class="small" style="margin:0 0 12px;padding:10px 14px;border-radius:8px;background:var(--warning-light);color:var(--warning-ink)">
+    Could not read <code>/api/health</code>. If runs fail, the Netlify functions may not be deployed.</p>`;
+  const problems = [];
+  if (!h.cloroKeyConfigured) problems.push("<b>CLORO_API_KEY is not set</b> in the Netlify site's environment variables, so every live check will come back as an error.");
+  if (h.blobs !== "ok") problems.push(`<b>Netlify Blobs is not available</b> (${esc(h.blobs)}), so nothing can be saved.`);
+  if (!problems.length) return "";
+  return `<p class="small" style="margin:0 0 12px;padding:10px 14px;border-radius:8px;background:var(--warning-light);color:var(--warning-ink)">
+    ${problems.join(" ")}</p>`;
 }
 
 async function saveTracked(tracked) {
@@ -228,6 +251,7 @@ function renderHome() {
       <b>ChatGPT, Perplexity, Gemini, Google AI Mode and AI Overviews</b> cite you for the same questions.
       Bing shows where you already win. The run shows where you don't, yet.</p>
     </div>
+    ${healthWarning()}
     <div class="panel">
       <h2>Projects</h2>
       ${state.projects.length ? `<div class="scroll"><table>
@@ -505,17 +529,19 @@ function renderSuggest(el) {
 // ---- tab 3: run ----
 function renderRun(el) {
   const tracked = state.current.tracked;
-  const providers = Object.entries(PROVIDER_LABELS);
+  const providers = runnableProviders().map((k) => [k, PROVIDER_LABELS[k]]);
+  const defaultOn = new Set(["openai", "perplexity", "gemini"]);
   el.innerHTML = `
     ${tracked.length ? `<div class="panel">
       <h2>Run tracked queries across AI surfaces</h2>
+      ${healthWarning()}
       <p class="muted small">Each selected query is asked live on each provider (the same monitoring pipeline Wellows uses in production)
       and the answer's citations are checked for <b>${esc(state.current.project.domain)}</b>. Capped at 20 queries per run.</p>
       <div class="row">
         <div><label>Queries (top N by Bing citations)</label><input type="number" id="topn" value="${Math.min(5, tracked.length)}" min="1" max="20" style="width:80px"></div>
         <div><label>Providers</label>
           ${providers.map(([k, l]) => `<label style="display:inline-flex;gap:6px;margin-right:12px;color:var(--gray-800);font-weight:400;align-items:center">
-            <input type="checkbox" data-p="${k}" ${k === "copilot" || k === "openai" || k === "perplexity" || k === "gemini" ? "checked" : ""}>${l}</label>`).join("")}
+            <input type="checkbox" data-p="${k}" ${defaultOn.has(k) ? "checked" : ""}>${l}</label>`).join("")}
         </div>
         <button id="start">Start run</button>
       </div>
@@ -563,31 +589,69 @@ function renderRun(el) {
     if (!provs.length) return toast("Pick at least one provider");
     const queries = [...tracked].sort((a, b) => (b.bingCitations || 0) - (a.bingCitations || 0)).slice(0, topn).map((t) => t.query);
     const runId = crypto.randomUUID().slice(0, 8);
-    await api("/api/run", { method: "POST", body: JSON.stringify({
-      projectId: state.current.project.id, runId, queries, providers: provs, region: state.current.project.region }) });
+    start.disabled = true;
+    let res;
+    try {
+      res = await api("/api/run", { method: "POST", body: JSON.stringify({
+        projectId: state.current.project.id, runId, queries, providers: provs, region: state.current.project.region }) });
+    } catch (e) { start.disabled = false; return toast(`Run did not start: ${e.message}`, 6000); }
+    if (res.status >= 400) {
+      start.disabled = false;
+      let detail = ""; try { detail = (await res.json()).error || ""; } catch { /* no body */ }
+      return toast(`Run did not start (HTTP ${res.status}${detail ? ": " + detail : ""})`, 6000);
+    }
     toast("Run started");
     pollRun(runId, queries.length * provs.length);
   };
 }
 
+const NOT_STARTED_MS = 90_000;   // run doc never appeared: function died before its first write
+const STALLED_MS = 4 * 60_000;    // no new result in this long: function was killed mid-run
+
 async function pollRun(runId, total) {
   const prog = document.getElementById("progress");
-  if (prog) prog.innerHTML = `<p class="muted small">Running… roughly a minute per query-provider pair.</p><progress max="${total}" value="0"></progress>`;
+  const note = (html) => { const n = document.getElementById("run-note"); if (n) n.innerHTML = html; };
+  if (prog) prog.innerHTML = `<p class="muted small" id="run-note">Running… roughly a minute per query-provider pair.</p><progress max="${total}" value="0"></progress>`;
+  const t0 = Date.now();
+  let lastDone = -1, lastChange = Date.now();
   const timer = setInterval(async () => {
     try {
       const res = await api(`/api/run-status?projectId=${state.current.project.id}&runId=${runId}`);
-      if (res.status === 404) return;
+      if (res.status === 404) {
+        if (Date.now() - t0 > NOT_STARTED_MS) {
+          clearInterval(timer);
+          note(`<span class="err">The run never started on the server.</span> The run function returned but wrote nothing.
+            Check the passcode, and that the site's Netlify plan supports background functions (Pro or above).`);
+          const s = document.getElementById("start"); if (s) s.disabled = false;
+        }
+        return;
+      }
       const { run } = await res.json();
       state.run = run;
       const bar = document.querySelector("#progress progress");
       if (bar) bar.value = run.done;
+      if (run.done !== lastDone) { lastDone = run.done; lastChange = Date.now(); }
+      else if (Date.now() - lastChange > STALLED_MS && run.status !== "completed") {
+        note(`<span class="err">No progress for ${Math.round((Date.now() - lastChange) / 60000)} minutes (${run.done}/${run.total} done).</span>
+          The run function was probably killed: Netlify only keeps a function alive this long when it runs as a
+          <b>background function</b>, which needs a Pro plan or above. Partial results are in step 4.`);
+      }
       if (run.status === "completed") {
         clearInterval(timer);
         toast("Run completed");
         await openProject(state.current.project.id);
         state.tab = "results"; renderProject();
       }
-    } catch { /* transient poll error — keep polling */ }
+    } catch (e) {
+      if (String(e.message) === "unauthorized") { clearInterval(timer); return; } // passcode screen is up
+      // Non-JSON 404/5xx (functions missing) lands here rather than in the 404 branch above.
+      if (lastDone < 0 && Date.now() - t0 > NOT_STARTED_MS) {
+        clearInterval(timer);
+        note(`<span class="err">The run never started on the server.</span> ${esc(e.message)}`);
+        const s = document.getElementById("start"); if (s) s.disabled = false;
+      }
+      // otherwise a transient poll error — keep polling
+    }
   }, 4000);
 }
 
@@ -656,9 +720,9 @@ function renderResults(el) {
         </td></tr>`).join("")}
       </table></div>
       <p class="muted small" style="margin-bottom:0">"Bing export: cited" is from your Bing Webmaster Tools export, an aggregate over ${bingPeriod()};
-      the provider columns (Copilot included) are single live checks of each answer's cited sources, matched against ${esc(state.current.project.domain)},
+      the provider columns are single live checks of each answer's cited sources, matched against ${esc(state.current.project.domain)},
       so the export and the live checks are directional evidence, not a like-for-like comparison. A query in the Bing export can
-      still come back "not cited" on the live Copilot check: answers vary run to run, and the export covers months of them.
+      still come back "not cited" on a live check: answers vary run to run, and the export covers months of them.
       <b>Click any row</b> to see exactly which sites and pages each AI cited, including the competitors winning answers you are missing from.</p>
       ${runs.length > 1 ? `<h3>Previous runs</h3><p>${runs.map((r) => `<button class="secondary sm" data-run="${r.id}">${r.id} (${r.status})</button>`).join(" ")}</p>` : ""}
     </div>`;
@@ -694,6 +758,7 @@ function renderResults(el) {
 
 // ---------- boot ----------
 try {
+  try { const h = await fetch("/api/health"); state.health = h.ok ? await h.json() : null; } catch { state.health = null; }
   await loadProjects();
 } catch (e) {
   if (String(e.message) !== "unauthorized") {

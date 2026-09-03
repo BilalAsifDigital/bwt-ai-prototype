@@ -2,9 +2,9 @@ import { readFileSync } from "node:fs";
 import { detectReportType, parseQueriesReport, parsePagesReport, parseOverviewReport } from "../site/js/lib/parseBwt.mjs";
 import { buildSuggestions } from "../site/js/lib/suggest.mjs";
 
-const q = readFileSync(new URL("../data/queries.csv", import.meta.url), "utf8");
-const p = readFileSync(new URL("../data/pages.csv", import.meta.url), "utf8");
-const o = readFileSync(new URL("../data/overview.csv", import.meta.url), "utf8");
+const q = readFileSync(new URL("../site/data/queries.csv", import.meta.url), "utf8");
+const p = readFileSync(new URL("../site/data/pages.csv", import.meta.url), "utf8");
+const o = readFileSync(new URL("../site/data/overview.csv", import.meta.url), "utf8");
 
 console.log("detect:", detectReportType(q).type, detectReportType(p).type, detectReportType(o).type);
 

@@ -73,8 +73,8 @@ site/js/lib/suggest.mjs  scoring, dedupe, intent mapping, query rewrite
 site/data/*.csv          real wellows.com export, seeds the "Load demo" button
 lib/cloro.mjs            Cloro API client (providers, citation extraction)
 lib/auth.mjs             shared passcode gate
-netlify/functions/       projects, project-import, run-background, run-status
-test/                    stub server, screenshot harness, build scripts
+netlify/functions/       health, projects, project-import, run-background, run-status
+test/                    stub server (real functions, in-memory Blobs), screenshot harness, smoke test
 ```
 
 **Providers** (`lib/cloro.mjs`) — all via Cloro, one endpoint each, shared credit pool:
@@ -117,6 +117,7 @@ with directors or clients, since every viewer needs the connector.
 
 Build the preview surfaces with `node test/build-standalone.mjs` then
 `node test/build-artifact.mjs` (the artifact build derives from the standalone one).
+Neither build script has been committed to this repo yet; only the Netlify surface is buildable from a fresh clone.
 
 ---
 
